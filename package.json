@@ -1,0 +1,60 @@
+{
+  "name": "playlist-merger",
+  "version": "0.2.0",
+  "description": "Merge Spotify and YouTube playlists into one queue and play them back-to-back.",
+  "main": "src/main.js",
+  "author": "Ashton",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "peerjs": "^1.5.4"
+  },
+  "build": {
+    "appId": "com.ashton.playlistmerger",
+    "productName": "Playlist Merger",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Playlist Merger",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.music",
+      "identity": null
+    },
+    "dmg": {
+      "title": "Playlist Merger"
+    }
+  }
+}
