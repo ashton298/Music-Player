@@ -4,7 +4,7 @@ Merge Spotify and YouTube playlists into one queue and play them back-to-back. N
 
 ## Install it
 
-Run `dist\Playlist Merger Setup 0.1.0.exe`. It installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\playlist-merger` and adds Desktop and Start menu shortcuts. Uninstall it from Windows Settings > Apps; your mixes are kept.
+Run `dist\Playlist Merger Setup 0.2.0.exe`. It installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\playlist-merger` and adds Desktop and Start menu shortcuts. Uninstall it from Windows Settings > Apps; your mixes are kept.
 
 The installer isn't code-signed, so if you copy it to another PC, Windows SmartScreen may warn about it ("More info" > "Run anyway").
 
@@ -26,6 +26,28 @@ Paste any of these into a mix:
 - A TikTok video link (`tiktok.com/@user/video/…` or a `vm.tiktok.com` share link). It plays the video's own soundtrack, exactly as it sounds in the TikTok. Profiles and sound pages aren't supported, and private or region-blocked videos won't load.
 
 Single songs and TikToks go into one "Single songs" group per mix, and each one gets its own Remove button.
+
+## Jam (listen together)
+
+Everyone needs Playlist Merger installed (Windows or Mac).
+
+1. **Host:** click **Jam: listen together** in the sidebar, type your name, and click **Start a Jam**. Send friends the 6-character code (use **Copy**).
+2. **Friends:** click **Jam: listen together**, type a name and the code, and click **Join**.
+3. **Adding songs:** anyone can paste a Spotify, YouTube or TikTok link in the Jam screen, or open one of their mixes and click songs (or **Add all songs**).
+4. **Controls:** only the host can pause, skip, seek and reorder, unless the host ticks **Let guests pause, skip and reorder**.
+5. **Leaving:** **Leave Jam** (guest) or **End Jam** (host). Closing the host's app ends the Jam.
+
+How it works: PeerJS's free public server (0.peerjs.com) introduces the apps, and they then talk directly, or through PeerJS's free relay if a network blocks that. Only small messages are sent: the queue, play/pause and "at second N". Every app downloads and plays the audio itself and keeps within about half a second of the host. For Spotify songs, the host's YouTube match is shared so everyone hears the same recording. Up to 20 people.
+
+## Mac version
+
+`.github/workflows/build.yml` builds the Windows installer and a Mac `.dmg` on GitHub's machines. Push the repo to GitHub, open **Actions > Build apps > Run workflow**, and download the files from the finished run's **Artifacts**.
+
+The Mac app isn't signed with an Apple Developer account, so macOS blocks it the first time. After dragging it into Applications, right-click it > **Open** > **Open**. If macOS says it's "damaged", run this once in Terminal:
+
+```
+xattr -cr "/Applications/Playlist Merger.app"
+```
 
 ## How it works
 
