@@ -4,7 +4,7 @@ Merge Spotify and YouTube playlists into one queue and play them back-to-back. N
 
 ## Install it
 
-Run `dist\Playlist Merger Setup 0.2.0.exe`. It installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\playlist-merger` and adds Desktop and Start menu shortcuts. Uninstall it from Windows Settings > Apps; your mixes are kept.
+Run `dist\Playlist Merger Setup 0.3.0.exe`. It installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\playlist-merger` and adds Desktop and Start menu shortcuts. Uninstall it from Windows Settings > Apps; your mixes are kept.
 
 The installer isn't code-signed, so if you copy it to another PC, Windows SmartScreen may warn about it ("More info" > "Run anyway").
 
@@ -35,7 +35,7 @@ Everyone needs Playlist Merger installed (Windows or Mac).
 2. **Friends:** click **Jam: listen together**, type a name and the code, and click **Join**.
 3. **Adding songs:** anyone can paste a Spotify, YouTube or TikTok link in the Jam screen, or open one of their mixes and click songs (or **Add all songs**).
 4. **Controls:** only the host can pause, skip, seek and reorder, unless the host ticks **Let guests pause, skip and reorder**.
-5. **Leaving:** **Leave Jam** (guest) or **End Jam** (host). Closing the host's app ends the Jam.
+5. **Leaving:** guests click **Leave Jam**. The host can click **Leave Jam**, which hands the Jam to a random guest (same code, the music keeps playing, and everyone reconnects to them automatically), or **End Jam for everyone**. If the host's app closes or crashes, the same handoff happens on its own within about 10 seconds.
 
 How it works: PeerJS's free public server (0.peerjs.com) introduces the apps, and they then talk directly, or through PeerJS's free relay if a network blocks that. Only small messages are sent: the queue, play/pause and "at second N". Every app downloads and plays the audio itself and keeps within about half a second of the host. For Spotify songs, the host's YouTube match is shared so everyone hears the same recording. Up to 20 people.
 

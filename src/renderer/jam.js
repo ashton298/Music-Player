@@ -12,6 +12,7 @@ const MAX_QUEUE = 1000;
 const MAX_ADD = 300;
 const SYNC_EVERY_MS = 2000;
 const DRIFT_LIMIT_S = 0.6;
+const HOST_SILENT_MS = 8000;
 
 const jam = (window.jam = {
   active: false,
@@ -32,6 +33,12 @@ const jam = (window.jam = {
   bestRtt: Infinity,
   timers: [],
   failures: 0,
+  // Handoff: the host picks a random guest as heir and tells everyone, so if
+  // the host leaves (or their app dies) the heir takes over the same code.
+  heir: null, // heir's peer id
+  heirName: "",
+  myId: null, // guest's own peer id
+  handingOff: false,
 });
 
 const myName = () => (localStorage.getItem("jam-name") || "").trim() || "Someone";
@@ -90,6 +97,11 @@ function every(ms, fn) {
   jam.timers.push(setInterval(fn, ms));
 }
 
+function clearTimers() {
+  for (const t of jam.timers) clearInterval(t);
+  jam.timers = [];
+}
+
 function stopMixPlayback() {
   state.loadToken++;
   state.queue = [];
@@ -103,6 +115,7 @@ function resetJam() {
   Object.assign(jam, {
     active: false, role: null, code: "", peer: null, hostConn: null, queue: [], now: -1, allowControl: false,
     loading: false, members: [], lastSync: null, loadedQid: null, clockOffset: 0, bestRtt: Infinity, timers: [], failures: 0,
+    heir: null, heirName: "", myId: null, handingOff: false,
   });
   jam.guests = new Map();
   state.loadToken++;
@@ -137,17 +150,24 @@ function prefetchAfter(index) {
 
 // ---- Host ---------------------------------------------------------------------
 
-function startHost() {
-  stopMixPlayback();
-  const code = newCode();
-  jamStatus("Starting your Jam…");
+// takeover = { code, queue, now, allow, deadline } when a guest inherits the Jam.
+function startHost(takeover = null) {
+  if (!takeover) stopMixPlayback();
+  const code = takeover?.code ?? newCode();
+  if (!takeover) jamStatus("Starting your Jam…");
   const peer = new Peer(JAM_PREFIX + code, { debug: 0 });
   peer.on("open", () => {
-    Object.assign(jam, { active: true, role: "host", code, peer, members: [] });
+    clearTimers();
+    Object.assign(jam, { active: true, role: "host", code, peer, members: [], handingOff: false, heir: null, heirName: "", loading: false });
     jam.guests = new Map();
+    if (takeover) {
+      jam.queue = takeover.queue;
+      jam.now = takeover.now;
+      jam.allowControl = takeover.allow;
+    }
     every(SYNC_EVERY_MS, () => broadcast(syncMsg()));
     setControlsForJam();
-    jamStatus("");
+    jamStatus(takeover ? "The host left, so you're the host now. Everyone else is reconnecting to you." : "");
     renderJam();
     renderSidebar();
   });
@@ -159,7 +179,10 @@ function startHost() {
   peer.on("error", (err) => {
     if (err.type === "unavailable-id") {
       peer.destroy();
-      startHost(); // code clash; pick another
+      if (!takeover) startHost(); // code clash; pick another
+      // The old host's id can linger for a few seconds after they vanish.
+      else if (Date.now() < takeover.deadline) setTimeout(() => startHost(takeover), 2000);
+      else leaveJam("Couldn't take over the Jam. Start a new one.");
       return;
     }
     if (!jam.active) {
@@ -233,6 +256,8 @@ function fullState() {
     now: jam.now,
     allow: jam.allowControl,
     members: [`${myName()} (host)`, ...[...jam.guests.values()].map((g) => g.name)],
+    heir: jam.heir,
+    heirName: jam.guests.get(jam.heir)?.name ?? "",
     sync: syncMsg(),
   };
 }
@@ -242,6 +267,10 @@ function broadcast(msg) {
 }
 
 function afterChange() {
+  if (!jam.guests.has(jam.heir)) {
+    const ids = [...jam.guests.keys()];
+    jam.heir = ids.length ? ids[Math.floor(Math.random() * ids.length)] : null;
+  }
   jam.members = [`${myName()} (host)`, ...[...jam.guests.values()].map((g) => g.name)];
   broadcast(fullState());
   renderJam();
@@ -347,30 +376,42 @@ function setAllowControl(on) {
 
 // ---- Guest --------------------------------------------------------------------
 
-function joinJam(rawCode) {
+// rejoin = { onFail } while reconnecting to a new host after a handoff.
+function joinJam(rawCode, rejoin = null) {
   const code = rawCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length !== 6) return jamStatus("Jam codes are 6 letters and numbers.", true);
-  stopMixPlayback();
-  jamStatus("Connecting…");
+  if (!rejoin) {
+    stopMixPlayback();
+    jamStatus("Connecting…");
+  }
   const peer = new Peer({ debug: 0 });
   let opened = false;
-  const giveUp = setTimeout(() => {
-    if (opened) return;
+  const fail = (message) => {
     peer.destroy();
-    jamStatus("Couldn't reach that Jam. Check the code and that the host still has it open.", true);
-  }, 15000);
-  peer.on("open", () => {
+    if (rejoin) rejoin.onFail();
+    else jamStatus(message, true);
+  };
+  const giveUp = setTimeout(() => {
+    if (!opened) fail("Couldn't reach that Jam. Check the code and that the host still has it open.");
+  }, rejoin ? 6000 : 15000);
+  peer.on("open", (id) => {
     const conn = peer.connect(JAM_PREFIX + code, { reliable: true });
     conn.on("open", () => {
       opened = true;
       clearTimeout(giveUp);
-      Object.assign(jam, { active: true, role: "guest", code, peer, hostConn: conn });
+      clearTimers();
+      Object.assign(jam, { active: true, role: "guest", code, peer, hostConn: conn, myId: id, handingOff: false, bestRtt: Infinity, lastHeard: Date.now() });
       conn.send({ type: "hello", name: myName() });
       ping();
       every(4000, ping);
       every(1000, follow);
+      // The host syncs every 2 s. A crashed host's connection can take 30 s+
+      // to report closing, so silence is the faster signal.
+      every(1000, () => {
+        if (jam.role === "guest" && !jam.handingOff && Date.now() - jam.lastHeard > HOST_SILENT_MS) hostGone();
+      });
       setControlsForJam();
-      jamStatus("");
+      jamStatus(rejoin ? "Reconnected to the new host." : "");
       renderJam();
       renderSidebar();
     });
@@ -382,16 +423,42 @@ function joinJam(rawCode) {
       }
     });
     conn.on("close", () => {
-      if (jam.hostConn !== conn) return;
-      leaveJam("The Jam ended, or the connection to the host was lost.");
+      if (jam.hostConn !== conn || jam.role !== "guest") return;
+      hostGone(); // left without saying so, or the connection dropped
     });
   });
   peer.on("error", (err) => {
     if (opened) return;
     clearTimeout(giveUp);
-    peer.destroy();
-    jamStatus(err.type === "peer-unavailable" ? "There's no Jam with that code right now." : `Couldn't join: ${friendlyError(err)}`, true);
+    fail(err.type === "peer-unavailable" ? "There's no Jam with that code right now." : `Couldn't join: ${friendlyError(err)}`);
   });
+}
+
+// The host left: the heir becomes host on the same code, everyone else
+// reconnects to it. Music keeps playing from the last known position meanwhile.
+function hostGone() {
+  if (jam.handingOff || jam.role !== "guest") return;
+  jam.handingOff = true;
+  const code = jam.code;
+  const oldPeer = jam.peer;
+  jam.hostConn = null;
+  clearTimers();
+  every(1000, follow);
+  setTimeout(() => oldPeer?.destroy(), 200);
+  const deadline = Date.now() + 60000;
+  if (jam.heir && jam.heir === jam.myId) {
+    jamStatus("The host left. Taking over the Jam…");
+    const now = jam.queue.findIndex((i) => i.qid === jam.loadedQid);
+    startHost({ code, queue: jam.queue, now: now >= 0 ? now : jam.now, allow: jam.allowControl, deadline });
+    return;
+  }
+  jamStatus(`The host left. Reconnecting${jam.heirName ? ` to ${jam.heirName}` : ""}…`);
+  const attempt = () => {
+    if (!jam.handingOff) return;
+    if (Date.now() > deadline) return leaveJam("The host left and nobody could take over the Jam.");
+    joinJam(code, { onFail: () => setTimeout(attempt, 3000) });
+  };
+  setTimeout(attempt, 2500);
 }
 
 function ping() {
@@ -400,12 +467,15 @@ function ping() {
 
 function guestHandle(msg) {
   if (!msg || typeof msg !== "object") return;
+  jam.lastHeard = Date.now();
   switch (msg.type) {
     case "state": {
       jam.queue = Array.isArray(msg.queue) ? msg.queue.slice(0, MAX_QUEUE).map(cleanItem).filter(Boolean) : [];
       jam.now = Number.isInteger(msg.now) && msg.now < jam.queue.length ? msg.now : -1;
       jam.allowControl = !!msg.allow;
       jam.members = Array.isArray(msg.members) ? msg.members.slice(0, 25).map((m) => str(m, 40)) : [];
+      jam.heir = typeof msg.heir === "string" ? msg.heir.slice(0, 64) : null;
+      jam.heirName = str(msg.heirName, 30);
       setControlsForJam();
       renderJam();
       renderSidebar();
@@ -431,6 +501,9 @@ function guestHandle(msg) {
       break;
     case "ended":
       leaveJam("The host ended the Jam.");
+      break;
+    case "handoff":
+      hostGone();
       break;
   }
 }
@@ -510,8 +583,9 @@ jam.addTracks = (tracks) => {
   setStatus(msg);
 };
 
-function leaveJam(message) {
-  if (jam.role === "host") broadcast({ type: "ended" });
+// A host leaving hands the Jam to the heir unless endForAll is set.
+function leaveJam(message, { endForAll = false } = {}) {
+  if (jam.role === "host") broadcast({ type: endForAll || !jam.guests.size ? "ended" : "handoff" });
   const peer = jam.peer;
   resetJam();
   setTimeout(() => peer?.destroy(), 300);
@@ -662,7 +736,14 @@ function activeView() {
           )
         : el("span", { class: "muted" }, jam.allowControl ? "The host lets everyone control playback." : "The host controls playback. You can add songs."),
       el("span", { class: "spacer" }),
-      el("button", { type: "button", class: "btn btn-danger", onclick: () => leaveJam() }, isHost ? "End Jam" : "Leave Jam"),
+      isHost && jam.guests.size
+        ? el("button", { type: "button", class: "btn", title: "A random guest becomes the host and the music keeps going", onclick: () => leaveJam() }, "Leave Jam")
+        : null,
+      el(
+        "button",
+        { type: "button", class: "btn btn-danger", onclick: () => leaveJam(null, { endForAll: isHost }) },
+        isHost ? (jam.guests.size ? "End Jam for everyone" : "End Jam") : "Leave Jam",
+      ),
     ),
     addForm,
     el("p", { id: "jam-status", class: "status", role: "status" }),
@@ -689,6 +770,6 @@ for (const ev of ["play", "pause", "seeked"]) {
 }
 
 window.addEventListener("beforeunload", () => {
-  if (jam.role === "host") broadcast({ type: "ended" });
+  if (jam.role === "host") broadcast({ type: jam.guests.size ? "handoff" : "ended" });
   jam.peer?.destroy();
 });
