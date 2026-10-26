@@ -1,9 +1,14 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const ytdlp = require("./ytdlp");
 const sources = require("./sources");
+const themes = require("./themes");
+const auth = require("./auth");
+
+// Theme files (CSS, images, fonts) are served from pmtheme://<theme id>/...
+protocol.registerSchemesAsPrivileged([{ scheme: "pmtheme", privileges: { standard: true, secure: true, corsEnabled: true } }]);
 
 // ---- Library (mixes + remembered Spotify -> YouTube matches) -------------
 
@@ -93,9 +98,15 @@ function createWindow() {
   });
 }
 
+// Everything except signing in needs a signed-in user.
+let authReady = Promise.resolve();
 const handle = (channel, fn) =>
   ipcMain.handle(channel, async (_e, ...args) => {
     try {
+      if (!channel.startsWith("auth:")) {
+        await authReady;
+        if (!auth.isSignedIn()) throw new Error("Sign in first.");
+      }
       return { ok: true, value: await fn(...args) };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
@@ -120,13 +131,50 @@ handle("tools:prepare", () => ytdlp.ensure());
 handle("shell:open", (url) => {
   if (/^https:\/\//.test(url)) shell.openExternal(url);
 });
+handle("auth:status", async () => {
+  await authReady;
+  return auth.status();
+});
+handle("auth:sendCode", (email) => auth.sendCode(email));
+handle("auth:verify", (email, code) => auth.verify(email, code));
+handle("auth:signOut", () => auth.signOut());
+handle("themes:list", () => themes.list());
+handle("themes:import", (bytes) => themes.importZip(bytes));
+handle("themes:remove", (id) => themes.remove(id));
+handle("themes:guide", () => themes.guide());
+handle("themes:export", async (opts) => {
+  const win = BrowserWindow.getFocusedWindow();
+  const name = String(opts?.name || "My theme").replace(/[^\w\- ]+/g, "").trim() || "My theme";
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: "Save theme",
+    defaultPath: path.join(app.getPath("downloads"), `${name}.zip`),
+    filters: [{ name: "Theme zip", extensions: ["zip"] }],
+  });
+  if (canceled || !filePath) return null;
+  fs.writeFileSync(filePath, themes.exportZip(opts));
+  return filePath;
+});
+handle("themes:saveGuide", async () => {
+  const win = BrowserWindow.getFocusedWindow();
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: "Save the theme guide",
+    defaultPath: path.join(app.getPath("downloads"), "Playlist Merger theme guide.md"),
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  if (canceled || !filePath) return null;
+  fs.writeFileSync(filePath, themes.guide());
+  return filePath;
+});
 
 // Groups the taskbar button and media controls under the app's own name and icon.
 app.setAppUserModelId("com.ashton.playlistmerger");
 
 app.whenReady().then(() => {
+  auth.start((status) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send("auth:locked", status)));
+  authReady = auth.recheck().catch(() => {});
   loadLibrary();
   ytdlp.cleanCache();
+  protocol.handle("pmtheme", themes.serve);
   createWindow();
 });
 

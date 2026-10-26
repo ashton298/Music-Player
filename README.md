@@ -40,14 +40,47 @@ Paste any of these into a mix:
 
 Single songs and TikToks go into one "Single songs" group per mix, and each one gets its own Remove button.
 
+## Sign-in (invite list)
+
+When sign-in is turned on, only emails on the owner's Google Sheet can use the app. A person types their email, gets a 6-digit code by email, and stays signed in. The app re-checks each time it opens (and every 6 hours while open), so removing an email from the sheet locks that person out. It keeps working offline for up to 3 days since the last check.
+
+**Turning it on** (free, with no database or server to pay for):
+1. Make a Google Sheet. Put the allowed emails in column A of the first tab, one per row. A header row is fine.
+2. In the sheet: **Extensions > Apps Script**. Delete what's there, paste in [server/apps-script.gs](server/apps-script.gs), and save.
+3. **Deploy > New deployment**, click the gear, and pick **Web app**. Set **Execute as: Me** and **Who has access: Anyone**, then click **Deploy**. Approve the permissions (Google warns that the app isn't verified because it's your own script: **Advanced > Go to … (unsafe)**). It needs to read the sheet and send email as you.
+4. Copy the **Web app URL** (`https://script.google.com/macros/s/…/exec`) into `src/auth-config.json` as `"url"`, then rebuild.
+
+Codes come from the owner's Gmail (Google allows about 100 a day on a free account). To sign everyone out, delete the `SECRET` script property (Project Settings > Script properties). If you change the script, use **Deploy > Manage deployments > Edit > New version** so the URL stays the same. With `"url": ""`, sign-in is off.
+
+This keeps casual users out, but the app is open source, so someone technical could build a copy with the check removed.
+
+## Queue
+
+Right-click any song (or hover it and click **⋯**) for **Play next** and **Add to queue**. **Add to queue** at the top of a mix queues the whole mix. Queued songs play before the rest of the mix, and the mix carries on where it left off once the queue is empty.
+
+Click **Queue** in the player bar to see what's playing, **Next in queue** (drag the ⠿ handle, or focus it and use the arrow keys, to reorder; ✕ removes; click a song to jump to it) and what's next from the mix.
+
+## Customize the look
+
+Click **Customize look** at the bottom of the sidebar:
+- **Colors, text, shape and size, layout, show or hide, background, motion:** sliders, color pickers and switches that change the app as you go.
+- **Move and resize panels on screen:** drag a panel's label to move the sidebar or queue to the other side, the player bar to the top, or to swap the parts of the player bar. Drag panel edges to resize (this works any time; double-click an edge to reset it).
+- **Ctrl+Shift+0** resets everything to the default look.
+
+### Themes
+
+A theme is a zip with a `theme.json` (the same settings as the Customize drawer), and optionally a `theme.css`, images and fonts. Themes can't contain code. Import one with **Import a theme (.zip)** or by dropping it on the drawer, and share your own look with **Export .zip**.
+
+To have an AI make one: click **Copy AI theme guide**, paste it into ChatGPT, Claude or Gemini, and describe the look you want. The guide ([src/THEME-GUIDE.md](src/THEME-GUIDE.md)) lists every setting and the page's class names. Imported themes are stored in the app's data folder under `themes\`.
+
 ## Jam (listen together)
 
 Everyone needs Playlist Merger installed (Windows or Mac).
 
 1. **Host:** click **Jam: listen together** in the sidebar, type your name, and click **Start a Jam**. Send friends the 6-character code (use **Copy**).
 2. **Friends:** click **Jam: listen together**, type a name and the code, and click **Join**.
-3. **Adding songs:** anyone can paste a Spotify, YouTube or TikTok link in the Jam screen, or open one of their mixes and click songs (or **Add all songs**).
-4. **Controls:** only the host can pause, skip, seek and reorder, unless the host ticks **Let guests pause, skip and reorder**.
+3. **Adding songs:** anyone can paste a Spotify, YouTube or TikTok link in the Jam screen, or open one of their mixes and click songs (or **Add all songs**). Right-click a song for **Play next in the Jam**, which puts it right after the current song.
+4. **Controls:** everyone can drag or remove the songs **they** added that haven't played yet. Only the host can pause, skip, seek and reorder or remove other people's songs, unless the host ticks **Let guests pause, skip and reorder everything**.
 5. **Leaving:** guests click **Leave Jam**. The host can click **Leave Jam**, which hands the Jam to a random guest (same code, the music keeps playing, and everyone reconnects to them automatically), or **End Jam for everyone**. If the host's app closes or crashes, the same handoff happens on its own within about 10 seconds.
 
 How it works: PeerJS's free public server (0.peerjs.com) introduces the apps, and they then talk directly, or through PeerJS's free relay if a network blocks that. Only small messages are sent: the queue, play/pause and "at second N". Every app downloads and plays the audio itself and keeps within about half a second of the host. For Spotify songs, the host's YouTube match is shared so everyone hears the same recording. Up to 20 people.
@@ -62,7 +95,7 @@ Bump `version` in `package.json`, commit, then push a tag (`git tag v0.3.2 && gi
 - **YouTube / YouTube Music playlists** are read with yt-dlp.
 - **Playback:** every song plays as YouTube audio. A Spotify song is matched once through YouTube Music's song search (scored by title, artist and length) and the match is remembered. The audio is downloaded with yt-dlp into a cache, so replays are instant. The next song is pre-downloaded while the current one plays.
 - **yt-dlp** is downloaded into the app's data folder on first run and updates itself every 4 days.
-- **Data** lives in `%APPDATA%\playlist-merger\`: `library.json` holds your mixes and the Spotify-to-YouTube matches, `cache\` holds audio (cleared after 30 days without a play), and `bin\` holds yt-dlp.
+- **Data** lives in `%APPDATA%\playlist-merger\`: `library.json` holds your mixes and the Spotify-to-YouTube matches, `cache\` holds audio (cleared after 30 days without a play), `bin\` holds yt-dlp, and `themes\` holds imported themes.
 
 ## Limits
 

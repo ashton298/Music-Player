@@ -39,11 +39,33 @@ const jam = (window.jam = {
   heirName: "",
   myId: null, // guest's own peer id
   handingOff: false,
+  // Who added each song, so guests can move and remove their own. Each app
+  // keeps a secret and only ever shows a hash of it, so nobody can pose as
+  // someone else.
+  myCid: null,
 });
 
 const myName = () => (localStorage.getItem("jam-name") || "").trim() || "Someone";
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => CODE_CHARS[b % CODE_CHARS.length]).join("");
 const jamUid = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
+const SECRET = /^[a-f0-9]{32}$/;
+const CID = /^[a-f0-9]{12}$/;
+
+async function cidFor(secret) {
+  if (!SECRET.test(secret || "")) return null;
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)));
+  return Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function mySecret() {
+  let s = localStorage.getItem("jam-secret");
+  if (!SECRET.test(s || "")) {
+    s = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+    localStorage.setItem("jam-secret", s);
+  }
+  return s;
+}
+cidFor(mySecret()).then((cid) => (jam.myCid = cid));
 
 // ---- Validation: everything from another app is untrusted -----------------
 
@@ -73,11 +95,11 @@ function cleanTrack(t) {
 function cleanItem(t) {
   const c = cleanTrack(t);
   if (!c) return null;
-  return { ...c, qid: /^[a-f0-9]{12}$/.test(t.qid || "") ? t.qid : jamUid(), by: str(t.by, 30) || "Someone" };
+  return { ...c, qid: /^[a-f0-9]{12}$/.test(t.qid || "") ? t.qid : jamUid(), by: str(t.by, 30) || "Someone", cid: CID.test(t.cid || "") ? t.cid : null };
 }
 
 const trackOnly = (item) => {
-  const { qid, by, ...t } = item;
+  const { qid, by, cid, ...t } = item;
   return t;
 };
 
@@ -92,6 +114,8 @@ function jamStatus(text, error = false) {
 
 const nowItem = () => (jam.now >= 0 ? jam.queue[jam.now] : null);
 const canControl = () => jam.role === "host" || jam.allowControl;
+// Anyone can move or remove a song they added, as long as it hasn't played yet.
+const canEditItem = (item, i) => canControl() || (i > jam.now && !!item.cid && item.cid === jam.myCid);
 
 function every(ms, fn) {
   jam.timers.push(setInterval(fn, ms));
@@ -107,6 +131,7 @@ function stopMixPlayback() {
   state.queue = [];
   state.order = [];
   state.pos = -1;
+  state.current = null;
   audio.pause();
 }
 
@@ -199,7 +224,7 @@ function hostAccept(conn) {
       setTimeout(() => conn.close(), 500);
       return;
     }
-    jam.guests.set(conn.peer, { conn, name: "Someone" });
+    jam.guests.set(conn.peer, { conn, name: "Someone", cid: null });
   });
   conn.on("data", (msg) => {
     try {
@@ -220,20 +245,33 @@ function hostHandle(conn, msg) {
   switch (msg.type) {
     case "hello":
       guest.name = str(msg.name, 30).trim() || "Someone";
-      conn.send(fullState());
-      afterChange();
+      cidFor(msg.secret).then((cid) => {
+        guest.cid = cid;
+        conn.send(fullState());
+        afterChange();
+      });
       break;
     case "ping":
       if (Number.isFinite(msg.t)) conn.send({ type: "pong", t: msg.t, h: Date.now() });
       break;
     case "add":
-      if (Array.isArray(msg.tracks)) addToQueue(msg.tracks.slice(0, MAX_ADD), guest.name);
+      if (Array.isArray(msg.tracks)) addToQueue(msg.tracks.slice(0, MAX_ADD), guest.name, { next: msg.next === true, cid: guest.cid });
       break;
-    case "control":
-      if (!jam.allowControl) conn.send({ type: "denied" });
-      else hostControl(str(msg.action, 20), msg.arg);
+    case "control": {
+      const action = str(msg.action, 20);
+      if (jam.allowControl || ownsUpcoming(guest, action, msg.arg)) hostControl(action, msg.arg);
+      else conn.send({ type: "denied" });
       break;
+    }
   }
+}
+
+// A guest without control rights may still move or remove songs they added.
+function ownsUpcoming(guest, action, arg) {
+  if (action !== "remove" && action !== "move") return false;
+  const qid = action === "remove" ? arg : arg?.qid;
+  const i = jam.queue.findIndex((it) => it.qid === qid);
+  return i > jam.now && !!guest.cid && jam.queue[i].cid === guest.cid;
 }
 
 function syncMsg() {
@@ -277,15 +315,17 @@ function afterChange() {
   renderSidebar();
 }
 
-function addToQueue(tracks, by) {
+// next: insert right after the current song instead of at the end.
+function addToQueue(tracks, by, { next = false, cid = null } = {}) {
   const room = MAX_QUEUE - jam.queue.length;
-  const items = tracks.map((t) => cleanItem({ ...t, qid: undefined, by })).filter(Boolean).slice(0, Math.max(0, room));
+  const items = tracks.map((t) => cleanItem({ ...t, qid: undefined, by, cid })).filter(Boolean).slice(0, Math.max(0, room));
   if (!items.length) return 0;
-  jam.queue.push(...items);
-  const idle = jam.now < 0 || (jam.now === jam.queue.length - items.length - 1 && audio.ended);
-  if (idle) hostPlay(jam.queue.length - items.length);
+  const idle = jam.now < 0 || (jam.now === jam.queue.length - 1 && audio.ended);
+  const at = next && jam.now >= 0 ? jam.now + 1 : jam.queue.length;
+  jam.queue.splice(at, 0, ...items);
+  if (idle) hostPlay(at);
   else {
-    if (jam.now === jam.queue.length - items.length - 1) prefetchAfter(jam.now);
+    if (at === jam.now + 1) prefetchAfter(jam.now);
     afterChange();
   }
   return items.length;
@@ -356,7 +396,19 @@ function hostControl(action, arg) {
       afterChange();
       return;
     }
-    case "up":
+    case "move": {
+      // Only songs still to come can be moved, and not above the current one.
+      const i = findIndex(arg?.qid);
+      if (i <= jam.now || !Number.isInteger(arg?.to)) return;
+      const j = Math.max(jam.now + 1, Math.min(arg.to, jam.queue.length - 1));
+      if (i === j) return;
+      const [item] = jam.queue.splice(i, 1);
+      jam.queue.splice(j, 0, item);
+      if (j === jam.now + 1 || i === jam.now + 1) prefetchAfter(jam.now);
+      afterChange();
+      return;
+    }
+    case "up": // sent by older versions
     case "down": {
       const i = findIndex(arg);
       const j = action === "up" ? i - 1 : i + 1;
@@ -401,7 +453,7 @@ function joinJam(rawCode, rejoin = null) {
       clearTimeout(giveUp);
       clearTimers();
       Object.assign(jam, { active: true, role: "guest", code, peer, hostConn: conn, myId: id, handingOff: false, bestRtt: Infinity, lastHeard: Date.now() });
-      conn.send({ type: "hello", name: myName() });
+      conn.send({ type: "hello", name: myName(), secret: mySecret() });
       ping();
       every(4000, ping);
       every(1000, follow);
@@ -561,7 +613,9 @@ function follow() {
 // ---- Actions used by app.js and the Jam view ---------------------------------
 
 jam.control = (action, arg) => {
-  if (!canControl()) return jamStatus("Only the host can do that unless they turn on guest controls.", true);
+  const target = action === "remove" ? arg : arg?.qid;
+  const own = (action === "remove" || action === "move") && jam.queue.some((it, i) => it.qid === target && canEditItem(it, i));
+  if (!canControl() && !own) return jamStatus("Only the host can do that unless they turn on guest controls.", true);
   if (jam.role === "host") hostControl(action, arg);
   else jam.hostConn?.send({ type: "control", action, arg });
 };
@@ -573,14 +627,41 @@ jam.onEnded = () => {
   }
 };
 
-jam.addTracks = (tracks) => {
+jam.addTracks = (tracks, { next = false } = {}) => {
   const clean = tracks.map(cleanTrack).filter(Boolean).slice(0, MAX_ADD);
   if (!clean.length) return;
-  if (jam.role === "host") addToQueue(clean, myName());
-  else jam.hostConn?.send({ type: "add", tracks: clean });
-  const msg = clean.length === 1 ? `Added "${clean[0].title}" to the Jam.` : `Added ${clean.length} songs to the Jam.`;
+  if (jam.role === "host") addToQueue(clean, myName(), { next, cid: jam.myCid });
+  else jam.hostConn?.send({ type: "add", tracks: clean, next });
+  const what = clean.length === 1 ? `"${clean[0].title}"` : `${clean.length} songs`;
+  const msg = next ? `${what} will play next in the Jam.` : `Added ${what} to the Jam.`;
   jamStatus(msg);
   setStatus(msg);
+  toast(msg);
+};
+
+// Rows for the queue panel while in a Jam: what's playing and what's next.
+jam.queuePanel = () => {
+  const cur = nowItem();
+  const parts = [];
+  if (cur) parts.push(queueSection("Now playing", null, el("ol", { class: "q-list" }, queueRow(cur, { playing: true, sub: `${cur.artist} · added by ${cur.by}` }))));
+  const start = jam.now + 1;
+  const upcoming = jam.queue.slice(start);
+  const list = el(
+    "ol",
+    { class: "q-list" },
+    ...upcoming.map((item, k) => {
+      const i = start + k;
+      return queueRow(item, {
+        sub: `${item.artist} · added by ${item.by}`,
+        draggable: canEditItem(item, i),
+        onclick: canControl() ? () => jam.control("jump", item.qid) : null,
+        onRemove: canEditItem(item, i) ? () => jam.control("remove", item.qid) : null,
+      });
+    }),
+  );
+  makeSortable(list, (qid, to) => jam.control("move", { qid, to: start + to }));
+  parts.push(queueSection("Next in the Jam", null, upcoming.length ? list : el("p", { class: "muted q-empty" }, "Nothing queued. Anyone can add songs.")));
+  return parts;
 };
 
 // A host leaving hands the Jam to the heir unless endForAll is set.
@@ -617,6 +698,7 @@ function setControlsForJam() {
 // ---- Jam view ------------------------------------------------------------------
 
 function renderJam() {
+  renderQueue();
   const root = $("jam");
   if (!root || root.hidden) return;
   root.replaceChildren(jam.active ? activeView() : startView());
@@ -688,21 +770,21 @@ function activeView() {
   const rows = jam.queue.map((item, i) => {
     const played = i < jam.now;
     const playing = i === jam.now;
-    const upcoming = i > jam.now;
     const control = canControl();
+    const movable = i > jam.now && canEditItem(item, i);
     return el(
       "li",
-      { class: ["jam-row", playing ? "playing" : "", played ? "played" : ""].join(" ") },
-      el("span", { class: "t-num" }, playing ? "▶" : String(i + 1)),
+      { class: ["jam-row", playing ? "playing" : "", played ? "played" : ""].join(" "), "data-qid": item.qid, draggable: movable ? "true" : null },
+      movable
+        ? el("button", { type: "button", class: "drag-handle t-num", title: "Drag, or use the arrow keys, to move", "aria-label": `Move ${item.title}` }, "⠿")
+        : el("span", { class: "t-num" }, playing ? "▶" : String(i + 1)),
       item.art ? el("img", { class: "t-art", src: item.art, alt: "", loading: "lazy" }) : el("span", { class: "t-art" }),
       el("div", { class: "t-text" }, el("p", { class: "t-title" }, item.title), el("p", { class: "t-artist" }, `${item.artist} · added by ${item.by}`)),
       el(
         "span",
         { class: "t-tags" },
         control && !playing ? el("button", { type: "button", class: "link-btn", onclick: () => jam.control("jump", item.qid) }, "Play") : null,
-        control && upcoming && i > jam.now + 1 ? el("button", { type: "button", class: "link-btn", title: "Move up", onclick: () => jam.control("up", item.qid) }, "Up") : null,
-        control && upcoming && i < jam.queue.length - 1 ? el("button", { type: "button", class: "link-btn", title: "Move down", onclick: () => jam.control("down", item.qid) }, "Down") : null,
-        control ? el("button", { type: "button", class: "link-btn", onclick: () => jam.control("remove", item.qid) }, "Remove") : null,
+        control || movable ? el("button", { type: "button", class: "link-btn", onclick: () => jam.control("remove", item.qid) }, "Remove") : null,
         el("span", { class: `badge ${item.source}` }, LABELS[item.source]),
       ),
       el("span", { class: "t-dur" }, fmt(item.durationMs)),
@@ -732,9 +814,9 @@ function activeView() {
             "label",
             { class: "field-inline" },
             el("input", { type: "checkbox", ...(jam.allowControl ? { checked: "" } : {}), onchange: (e) => setAllowControl(e.target.checked) }),
-            " Let guests pause, skip and reorder",
+            " Let guests pause, skip and reorder everything",
           )
-        : el("span", { class: "muted" }, jam.allowControl ? "The host lets everyone control playback." : "The host controls playback. You can add songs."),
+        : el("span", { class: "muted" }, jam.allowControl ? "The host lets everyone control playback." : "The host controls playback. You can add songs, and move or remove the ones you added."),
       el("span", { class: "spacer" }),
       isHost && jam.guests.size
         ? el("button", { type: "button", class: "btn", title: "A random guest becomes the host and the music keeps going", onclick: () => leaveJam() }, "Leave Jam")
@@ -747,9 +829,15 @@ function activeView() {
     ),
     addForm,
     el("p", { id: "jam-status", class: "status", role: "status" }),
-    el("p", { class: "muted" }, "Tip: open any of your mixes on the left and click songs to add them here."),
-    jam.queue.length ? el("ol", { class: "track-list" }, ...rows) : el("p", { class: "muted jam-empty" }, "The queue is empty. Add a song to start the music."),
+    el("p", { class: "muted" }, "Tip: open any of your mixes on the left and click songs to add them here, or right-click a song to play it next."),
+    jam.queue.length ? sortableJamList(rows) : el("p", { class: "muted jam-empty" }, "The queue is empty. Add a song to start the music."),
   );
+}
+
+function sortableJamList(rows) {
+  const list = el("ol", { class: "track-list" }, ...rows);
+  makeSortable(list, (qid, to) => jam.control("move", { qid, to }));
+  return list;
 }
 
 async function copyCode(btn) {

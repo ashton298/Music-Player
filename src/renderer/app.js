@@ -10,6 +10,11 @@ const state = {
   queue: [],
   order: [], // indexes into queue, shuffled or not
   pos: -1, // position in order
+  contextName: "", // the mix the queue came from
+  // Songs the person queued by hand ("Add to queue" / "Play next"). They play
+  // before the rest of the mix, like Spotify's "Next in queue".
+  upNext: [],
+  current: null, // { track, fromQueue } for what's loaded in the player
   shuffle: false,
   repeat: "off", // off | all | one
   loadToken: 0,
@@ -118,6 +123,7 @@ function openJamView() {
 
 function render() {
   renderSidebar();
+  renderQueue();
   const mix = currentMix();
   const jamView = state.view === "jam";
   $("jam").hidden = !jamView;
@@ -139,7 +145,7 @@ function render() {
   if (playlists) parts.push(`${playlists} playlist${playlists === 1 ? "" : "s"}`);
   if (singles) parts.push(`${singles} single song${singles === 1 ? "" : "s"}`);
   $("mix-stats").textContent = mix.sources.length ? parts.join(" · ") : "Nothing here yet. Paste a playlist or song link below.";
-  $("play-all").disabled = $("shuffle-all").disabled = !tracks.length;
+  $("play-all").disabled = $("shuffle-all").disabled = $("queue-all").disabled = !tracks.length;
 
   $("source-list").replaceChildren(...mix.sources.map((s) => renderSource(mix, s)));
   renderTracks(tracks);
@@ -178,7 +184,13 @@ function renderTracks(tracks) {
       const cls = ["track", t.key === playingKey ? "playing" : "", state.failures.has(t.key) ? "failed" : ""].join(" ");
       return el(
         "li",
-        { class: cls, "data-key": t.key, title: state.failures.has(t.key) ? "Couldn't play this one last time" : "", onclick: () => (inJam() ? window.jam.addTracks([t]) : playFromMix(i)) },
+        {
+          class: cls,
+          "data-key": t.key,
+          title: state.failures.has(t.key) ? "Couldn't play this one last time" : "",
+          onclick: () => (inJam() ? window.jam.addTracks([t]) : playFromMix(i)),
+          oncontextmenu: (e) => (e.preventDefault(), trackMenu(e, [t], { play: () => playFromMix(i) })),
+        },
         el("span", { class: "t-num" }, String(i + 1)),
         art ? el("img", { class: "t-art", src: art, alt: "", loading: "lazy" }) : el("span", { class: "t-art" }),
         el("div", { class: "t-text" }, el("p", { class: "t-title" }, t.title), el("p", { class: "t-artist" }, t.artist)),
@@ -189,6 +201,7 @@ function renderTracks(tracks) {
             ? el("button", { type: "button", class: "link-btn", title: "Remove this song from the mix", onclick: (e) => (e.stopPropagation(), removeSingle(mix, t)) }, "Remove")
             : null,
           el("span", { class: `badge ${t.source}` }, LABELS[t.source]),
+          moreButton([t], { play: () => playFromMix(i) }),
         ),
         el("span", { class: "t-dur" }, fmt(t.durationMs)),
       );
@@ -301,7 +314,7 @@ function deleteMix() {
 
 // ---- Playback --------------------------------------------------------------
 
-const nowTrack = () => (state.pos >= 0 ? state.queue[state.order[state.pos]] : null);
+const nowTrack = () => state.current?.track ?? null;
 
 function buildOrder(startIndex) {
   const idx = state.queue.map((_, i) => i);
@@ -323,6 +336,7 @@ function playFromMix(index, { shuffle } = {}) {
   if (!mix) return;
   if (shuffle !== undefined) setShuffle(shuffle, false);
   state.queue = mergedTracks(mix);
+  state.contextName = mix.name;
   if (!state.queue.length) return;
   const start = index ?? (state.shuffle ? Math.floor(Math.random() * state.queue.length) : 0);
   buildOrder(start);
@@ -331,10 +345,21 @@ function playFromMix(index, { shuffle } = {}) {
 
 let consecutiveFailures = 0;
 
-async function playAt(pos) {
+function playAt(pos) {
   if (pos < 0 || pos >= state.order.length) return;
   state.pos = pos;
-  const track = nowTrack();
+  return playTrack(state.queue[state.order[pos]], false);
+}
+
+// Plays the first song in "Next in queue". The mix position stays put, so the
+// mix carries on from where it was once the queue runs out.
+function playQueued() {
+  const item = state.upNext.shift();
+  if (item) return playTrack(item, true);
+}
+
+async function playTrack(track, fromQueue) {
+  state.current = { track, fromQueue };
   const token = ++state.loadToken;
   audio.pause();
   showNow(track, track.source === "spotify" && !track.ytId ? "Finding it on YouTube…" : "Loading…");
@@ -362,16 +387,17 @@ async function playAt(pos) {
 }
 
 function prefetchNext() {
+  if (inJam()) return;
   const nextPos = state.pos + 1 < state.order.length ? state.pos + 1 : state.repeat === "all" ? 0 : -1;
-  if (nextPos < 0) return;
-  const t = state.queue[state.order[nextPos]];
-  window.api.prefetch(t).catch(() => {});
+  const t = state.upNext[0] ?? (nextPos >= 0 ? state.queue[state.order[nextPos]] : null);
+  if (t) window.api.prefetch(t).catch(() => {});
 }
 
 function next(auto = false) {
   if (inJam()) return auto ? window.jam.onEnded() : window.jam.control("next");
+  if (auto && state.repeat === "one" && state.current) return playTrack(state.current.track, state.current.fromQueue);
+  if (state.upNext.length) return playQueued();
   if (!state.order.length) return;
-  if (auto && state.repeat === "one") return playAt(state.pos);
   if (state.pos + 1 < state.order.length) return playAt(state.pos + 1);
   if (state.repeat === "all") {
     if (state.shuffle) buildOrder(null);
@@ -384,18 +410,22 @@ function next(auto = false) {
 
 function prev() {
   if (inJam()) return window.jam.control("prev");
-  if (!state.order.length) return;
-  if (audio.currentTime > 3 || state.pos === 0) {
+  if (!state.current) return;
+  if (audio.currentTime > 3) {
     audio.currentTime = 0;
     return;
   }
-  playAt(state.pos - 1);
+  // From a queued song, "previous" goes back to the mix song it interrupted.
+  if (state.current.fromQueue && state.pos >= 0) return playAt(state.pos);
+  if (!state.current.fromQueue && state.pos > 0) return playAt(state.pos - 1);
+  audio.currentTime = 0;
 }
 
 function togglePlay() {
   if (inJam()) return window.jam.control("toggle");
   if (!nowTrack()) {
-    if (currentMix()) playFromMix();
+    if (state.upNext.length) playQueued();
+    else if (currentMix()) playFromMix();
     return;
   }
   if (audio.paused) audio.play().catch(() => {});
@@ -405,10 +435,11 @@ function togglePlay() {
 function setShuffle(on, rebuild = true) {
   state.shuffle = on;
   $("btn-shuffle").setAttribute("aria-pressed", String(on));
-  if (rebuild && state.queue.length) {
+  if (rebuild && state.queue.length && state.pos >= 0) {
     const current = state.order[state.pos];
     buildOrder(current);
     state.pos = state.order.indexOf(current);
+    renderQueue();
   }
 }
 
@@ -484,6 +515,10 @@ $("jam-add-all").addEventListener("click", () => {
 $("empty-new").addEventListener("click", newMix);
 $("play-all").addEventListener("click", () => playFromMix(null, { shuffle: false }));
 $("shuffle-all").addEventListener("click", () => playFromMix(null, { shuffle: true }));
+$("queue-all").addEventListener("click", () => {
+  const mix = currentMix();
+  if (mix) enqueue(mergedTracks(mix));
+});
 $("delete-mix").addEventListener("click", deleteMix);
 $("add-form").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -523,7 +558,11 @@ if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("previoustrack", prev);
 }
 
-(async () => {
+// Starts once every script (queue.js, jam.js, customize.js) has loaded.
+window.addEventListener("DOMContentLoaded", async () => {
+  const auth = await window.api.authStatus().catch((e) => ({ required: true, signedIn: false, reason: "", email: "", error: e.message }));
+  if (!auth.signedIn) return showSignIn(auth);
+  showAccount(auth);
   const lib = await window.api.getLibrary();
   state.mixes = lib.mixes;
   state.matches = lib.matches;
@@ -531,4 +570,4 @@ if ("mediaSession" in navigator) {
   render();
   // Fetch yt-dlp in the background so the first song starts faster.
   window.api.prepareTools().catch(() => {});
-})();
+});

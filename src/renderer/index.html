@@ -4,22 +4,25 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' https: data:; media-src 'self' file:; style-src 'self'; script-src 'self'; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com"
+      content="default-src 'self'; img-src 'self' https: data: pmtheme:; media-src 'self' file:; style-src 'self' pmtheme:; font-src 'self' data: pmtheme:; script-src 'self'; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com"
     />
     <title>Playlist Merger</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app">
-      <aside class="sidebar">
+    <div class="app" id="app">
+      <aside class="sidebar panel" data-panel="sidebar">
         <h1 class="brand">Playlist Merger</h1>
         <button id="new-mix" class="btn btn-primary btn-block" type="button">+ New mix</button>
         <button id="jam-nav" class="jam-nav" type="button">Jam: listen together</button>
         <p class="side-label">Your mixes</p>
         <ul id="mix-list" class="mix-list"></ul>
+        <button id="customize-open" class="side-tool" type="button">Customize look</button>
+        <p id="account" class="account" hidden></p>
+        <div class="resizer" data-resize="sidebarWidth" title="Drag to resize"></div>
       </aside>
 
-      <main class="main" id="main">
+      <main class="main panel" id="main" data-panel="main">
         <section id="empty" class="empty">
           <h2>Merge your playlists</h2>
           <p>Make a mix, then paste Spotify, YouTube or TikTok links into it. Everything plays in one queue.</p>
@@ -30,7 +33,7 @@
 
         <section id="mix" class="mix" hidden>
           <div id="jam-banner" class="jam-banner" hidden>
-            <span>You're in a Jam. Click any song to add it to the Jam queue.</span>
+            <span>You're in a Jam. Click any song to add it to the Jam queue, or right-click it to play it next.</span>
             <button id="jam-add-all" class="btn" type="button">Add all songs</button>
           </div>
           <header class="mix-head">
@@ -39,6 +42,7 @@
             <div class="row">
               <button id="play-all" class="btn btn-primary" type="button">Play</button>
               <button id="shuffle-all" class="btn" type="button">Shuffle</button>
+              <button id="queue-all" class="btn" type="button">Add to queue</button>
               <label class="field-inline">
                 Order
                 <select id="mix-order">
@@ -64,8 +68,17 @@
         </section>
       </main>
 
-      <footer class="player">
-        <div class="now">
+      <aside class="queue-panel panel" id="queue-panel" data-panel="queue" aria-label="Queue">
+        <header class="queue-head">
+          <h2>Queue</h2>
+          <button id="queue-close" class="link-btn" type="button" title="Hide the queue">Hide</button>
+        </header>
+        <div id="queue-body" class="queue-body"></div>
+        <div class="resizer" data-resize="queueWidth" title="Drag to resize"></div>
+      </aside>
+
+      <footer class="player panel" data-panel="player">
+        <div class="now player-part" data-part="now">
           <img id="now-art" class="now-art" alt="" hidden />
           <div class="now-text">
             <p id="now-title" class="now-title">Nothing playing</p>
@@ -73,7 +86,7 @@
           </div>
         </div>
 
-        <div class="controls">
+        <div class="controls player-part" data-part="controls">
           <div class="buttons">
             <button id="btn-shuffle" class="icon-btn" type="button" title="Shuffle" aria-pressed="false">Shuffle</button>
             <button id="btn-prev" class="icon-btn" type="button" title="Previous" aria-label="Previous">
@@ -95,16 +108,34 @@
           </div>
         </div>
 
-        <label class="volume">
-          <span class="muted">Vol</span>
-          <input id="volume" type="range" min="0" max="100" value="80" aria-label="Volume" />
-        </label>
+        <div class="extras player-part" data-part="extras">
+          <button id="btn-queue" class="icon-btn" type="button" title="Show the queue" aria-pressed="false">Queue</button>
+          <label class="volume">
+            <span class="muted">Vol</span>
+            <input id="volume" type="range" min="0" max="100" value="80" aria-label="Volume" />
+          </label>
+        </div>
+        <div class="resizer" data-resize="playerArt" title="Drag to resize the player"></div>
       </footer>
     </div>
+
+    <div id="bg-layer" class="bg-layer" aria-hidden="true"></div>
+    <div id="menu" class="menu" role="menu" hidden></div>
+    <div id="edit-bar" class="edit-bar" hidden>
+      <span>Editing the layout: drag a panel's label to move it, and drag the edges to resize.</span>
+      <button id="edit-reset" class="btn" type="button">Reset layout</button>
+      <button id="edit-done" class="btn btn-primary" type="button">Done</button>
+    </div>
+    <div id="drop-zones" class="drop-zones" hidden></div>
+    <aside id="customize" class="customize" aria-label="Customize" hidden></aside>
+    <div id="signin" class="signin" hidden></div>
 
     <audio id="audio" preload="auto"></audio>
     <script src="vendor/peerjs.min.js"></script>
     <script src="app.js"></script>
+    <script src="signin.js"></script>
+    <script src="queue.js"></script>
     <script src="jam.js"></script>
+    <script src="customize.js"></script>
   </body>
 </html>
