@@ -1,6 +1,6 @@
 {
   "name": "playlist-merger",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Merge Spotify and YouTube playlists into one queue and play them back-to-back.",
   "main": "src/main.js",
   "author": "Ashton",
@@ -51,8 +51,10 @@
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.music",
-      "identity": null
+      "identity": null,
+      "notarize": false
     },
+    "afterPack": "build/adhoc-sign.js",
     "dmg": {
       "title": "Playlist Merger"
     }

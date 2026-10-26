@@ -1,6 +1,7 @@
 # Builds the Windows installer and the Mac app on GitHub's machines.
-# Run it from the repo's Actions tab ("Run workflow") or push a tag like v0.2.0.
-# The finished files appear under the run's "Artifacts".
+# Pushing a tag like v0.3.1 also publishes them as a GitHub Release, with fixed
+# file names so the README's "latest" download links always work.
+# "Run workflow" on the Actions tab only builds; the files land under the run's "Artifacts".
 name: Build apps
 
 on:
@@ -36,3 +37,44 @@ jobs:
           name: playlist-merger-${{ runner.os }}
           path: ${{ matrix.files }}
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Give the files fixed names
+        run: |
+          mkdir out
+          cp artifacts/playlist-merger-Windows/*.exe out/Playlist-Merger-Windows.exe
+          cp artifacts/playlist-merger-macOS/*.dmg out/Playlist-Merger-Mac.dmg
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Playlist Merger ${{ github.ref_name }}
+          files: out/*
+          body: |
+            ## Download
+
+            - **Windows:** [Playlist-Merger-Windows.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Playlist-Merger-Windows.exe)
+            - **Mac** (Intel and Apple Silicon): [Playlist-Merger-Mac.dmg](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Playlist-Merger-Mac.dmg)
+
+            No GitHub account needed. Click a link and the download starts.
+
+            ### Windows
+            1. Open the downloaded file.
+            2. If a blue "Windows protected your PC" box appears, click **More info**, then **Run anyway**. (The app isn't code-signed, which costs money; it's safe.)
+            3. It installs by itself and opens. Next time, use the **Playlist Merger** shortcut on your Desktop or in the Start menu.
+
+            ### Mac
+            1. Open the downloaded `.dmg` and drag **Playlist Merger** into **Applications**.
+            2. Open it from Applications. macOS will block it the first time because it isn't from a paid Apple developer account.
+            3. Open **System Settings > Privacy & Security**, scroll down, and click **Open Anyway** next to Playlist Merger. (On older macOS: right-click the app > **Open** > **Open**.)
+            4. If it says the app is **"damaged"**, open Terminal, paste this, press Enter, and open the app again:
+               ```
+               xattr -cr "/Applications/Playlist Merger.app"
+               ```

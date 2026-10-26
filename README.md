@@ -2,11 +2,22 @@
 
 Merge Spotify and YouTube playlists into one queue and play them back-to-back. No API keys and no Spotify Premium needed.
 
-## Install it
+## Download
 
-Run `dist\Playlist Merger Setup 0.3.0.exe`. It installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\playlist-merger` and adds Desktop and Start menu shortcuts. Uninstall it from Windows Settings > Apps; your mixes are kept.
+| | |
+|---|---|
+| **Windows** | [Download Playlist-Merger-Windows.exe](https://github.com/ashton298/Music-Player/releases/latest/download/Playlist-Merger-Windows.exe) |
+| **Mac** (Intel and Apple Silicon) | [Download Playlist-Merger-Mac.dmg](https://github.com/ashton298/Music-Player/releases/latest/download/Playlist-Merger-Mac.dmg) |
 
-The installer isn't code-signed, so if you copy it to another PC, Windows SmartScreen may warn about it ("More info" > "Run anyway").
+No GitHub account needed. These links always get the newest version.
+
+**Windows:** open the file. If a blue "Windows protected your PC" box appears, click **More info**, then **Run anyway** (the app isn't code-signed, which costs money). It installs just for you, with no admin prompt, opens, and adds Desktop and Start menu shortcuts. Uninstall it from Windows Settings > Apps; your mixes are kept.
+
+**Mac:** open the `.dmg` and drag **Playlist Merger** into **Applications**, then open it. macOS blocks it the first time because it isn't from a paid Apple developer account: go to **System Settings > Privacy & Security**, scroll down, and click **Open Anyway** (on older macOS, right-click the app > **Open** > **Open**). If it says the app is "damaged", run this once in Terminal and open it again:
+
+```
+xattr -cr "/Applications/Playlist Merger.app"
+```
 
 ## Develop
 
@@ -39,15 +50,9 @@ Everyone needs Playlist Merger installed (Windows or Mac).
 
 How it works: PeerJS's free public server (0.peerjs.com) introduces the apps, and they then talk directly, or through PeerJS's free relay if a network blocks that. Only small messages are sent: the queue, play/pause and "at second N". Every app downloads and plays the audio itself and keeps within about half a second of the host. For Spotify songs, the host's YouTube match is shared so everyone hears the same recording. Up to 20 people.
 
-## Mac version
+## Releasing a new version
 
-`.github/workflows/build.yml` builds the Windows installer and a Mac `.dmg` on GitHub's machines. Push the repo to GitHub, open **Actions > Build apps > Run workflow**, and download the files from the finished run's **Artifacts**.
-
-The Mac app isn't signed with an Apple Developer account, so macOS blocks it the first time. After dragging it into Applications, right-click it > **Open** > **Open**. If macOS says it's "damaged", run this once in Terminal:
-
-```
-xattr -cr "/Applications/Playlist Merger.app"
-```
+Bump `version` in `package.json`, commit, then push a tag (`git tag v0.3.2 && git push origin main v0.3.2`). `.github/workflows/build.yml` builds the Windows installer and the Mac `.dmg` on GitHub's machines and publishes them as a GitHub Release, and the download links above pick it up automatically. The Mac app is ad-hoc signed (`build/adhoc-sign.js`) so Apple Silicon Macs will run it.
 
 ## How it works
 
