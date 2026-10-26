@@ -2,7 +2,7 @@
 
 Combine your public Spotify and YouTube playlists into one queue and play them back-to-back.
 
-An independent hobby project, not affiliated with Spotify, YouTube, Google or TikTok. See [Disclaimer](#disclaimer).
+An independent project, not affiliated with Spotify, YouTube, Google or TikTok. See [Disclaimer](#disclaimer).
 
 ## Download
 
@@ -80,7 +80,7 @@ The app talks directly to Spotify, YouTube, YouTube Music and TikTok to read the
 
 ## Disclaimer
 
-Playlist Merger is an independent, free, non-commercial hobby project. It is not affiliated with, endorsed by or sponsored by Spotify, YouTube, Google or TikTok. Spotify, YouTube, YouTube Music and TikTok are trademarks of their respective owners and are named here only to describe which links the app accepts.
+Playlist Merger is an independent project. It is not affiliated with, endorsed by or sponsored by Spotify, YouTube, Google or TikTok. Spotify, YouTube, YouTube Music and TikTok are trademarks of their respective owners and are named here only to describe which links the app accepts.
 
 The app does not host, store on any server, or distribute any music. Audio is fetched by each user's own copy of the app, and the app uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), a separate open-source project that it downloads on first run. You are responsible for using the app in line with the terms of service of those platforms and the copyright laws where you live.
 
