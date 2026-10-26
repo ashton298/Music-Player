@@ -1,6 +1,8 @@
 # Playlist Merger
 
-Merge Spotify and YouTube playlists into one queue and play them back-to-back. No API keys and no Spotify Premium needed.
+Combine your public Spotify and YouTube playlists into one queue and play them back-to-back.
+
+An independent hobby project, not affiliated with Spotify, YouTube, Google or TikTok. See [Disclaimer](#disclaimer).
 
 ## Download
 
@@ -65,5 +67,25 @@ Bump `version` in `package.json`, commit, then push a tag (`git tag v0.3.2 && gi
 ## Limits
 
 - **Spotify:** public playlists only, and only the **first 100 songs** of each (that's all the embed page shows). Spotify's official API would lift this, but since February 2026 its developer mode only works if the app owner has Premium.
-- Reading YouTube through yt-dlp and YouTube Music's web search is unofficial. It's fine for personal use, but it can break when YouTube changes things. Updating yt-dlp usually fixes it, and that happens automatically.
+- Reading YouTube through yt-dlp and YouTube Music's web search is unofficial, and it can break when YouTube changes things. Updating yt-dlp usually fixes it, and that happens automatically.
 - The first play of a song takes a few seconds while it downloads.
+
+## Privacy
+
+Playlist Merger has no account, server or analytics of its own, and the author collects no data. Your mixes and cached audio stay on your computer in the app's data folder.
+
+The app talks directly to Spotify, YouTube, YouTube Music and TikTok to read the links you paste and fetch audio, the same way a browser would, and to GitHub to update yt-dlp. Those services see your IP address under their own privacy policies.
+
+**Jam:** joining or hosting a Jam connects you to PeerJS's public server (0.peerjs.com) and then directly to the other people in the Jam, or through PeerJS's relay. Like any peer-to-peer connection, everyone in a Jam can see each other's IP addresses, along with the names and songs you share there. Only Jam with people you know.
+
+## Disclaimer
+
+Playlist Merger is an independent, free, non-commercial hobby project. It is not affiliated with, endorsed by or sponsored by Spotify, YouTube, Google or TikTok. Spotify, YouTube, YouTube Music and TikTok are trademarks of their respective owners and are named here only to describe which links the app accepts.
+
+The app does not host, store on any server, or distribute any music. Audio is fetched by each user's own copy of the app, and the app uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), a separate open-source project that it downloads on first run. You are responsible for using the app in line with the terms of service of those platforms and the copyright laws where you live.
+
+The software is provided "as is", without warranty of any kind. See [LICENSE](LICENSE).
+
+## License
+
+[MIT](LICENSE)
